@@ -1,4 +1,5 @@
 import atexit
+import json
 import os
 import re
 import shlex
@@ -69,31 +70,34 @@ def parse_items(browser):
 
 def get_products(browser, category_urls):
     products_by_category = {}
-    for category, url in category_urls.items():
-        browser.visit(url)
-        if not browser.is_element_present_by_css(".below-header", wait_time=5):
-            raise Exception("Category page failed to load")
-        
+    for category, urls in category_urls.items():
         products_by_category[category] = {}
-        if browser.is_element_present_by_id("cat"):
-            if browser.is_element_present_by_css("div.product-area"):
-                # item list page (e.g. http://www.bjs.com/computers/laptops.category.747.743.2002360.1)
-                increase_items_per_page(browser)
-                filter_in_club(browser)
-                products = parse_items(browser)
-                products_by_category[category].update(products)
-            elif browser.is_element_present_by_css("div.categories"):
-                # subcategory page (e.g. http://www.bjs.com/fresh--refrigerated-food/bakery.category.3000000000000117225.3000000000000117224.2001257.1)
-                subcategory_cells = browser.find_by_css("a.cat")
-                subcategory_pages = {subcategory_cell.text: subcategory_cell["href"] for subcategory_cell in subcategory_cells}
-                products_by_subcategory = get_products(browser, subcategory_pages)
-                products_by_category[category].update(products_by_subcategory)
+
+        for url in urls:
+            print("{}: {}".format(category, url))
+            browser.visit(url)
+            if not browser.is_element_present_by_css(".below-header", wait_time=5):
+                raise Exception("Category page failed to load")
+            
+            if browser.is_element_present_by_id("cat"):
+                if browser.is_element_present_by_css("div.product-area"):
+                    # item list page (e.g. http://www.bjs.com/computers/laptops.category.747.743.2002360.1)
+                    increase_items_per_page(browser)
+                    filter_in_club(browser)
+                    products = parse_items(browser)
+                    products_by_category[category].update(products)
+                elif browser.is_element_present_by_css("div.categories"):
+                    # subcategory page (e.g. http://www.bjs.com/fresh--refrigerated-food/bakery.category.3000000000000117225.3000000000000117224.2001257.1)
+                    subcategory_cells = browser.find_by_css("a.cat")
+                    subcategory_pages = {subcategory_cell.text: [subcategory_cell["href"]] for subcategory_cell in subcategory_cells}
+                    products_by_subcategory = get_products(browser, subcategory_pages)
+                    products_by_category[category].update(products_by_subcategory)
+                else:
+                    # unrecognized page
+                    pass
             else:
-                # unrecognized page
+                # special landing page (e.g. http://www.bjs.com/apple.content.minisite_apple.B#/selection)
                 pass
-        else:
-            # special landing page (e.g. http://www.bjs.com/apple.content.minisite_apple.B#/selection)
-            pass
 
     return products_by_category
 
@@ -101,10 +105,10 @@ def get_category_urls(browser):
     shop_menu = browser.find_by_xpath("//ul[contains(@class, 'menu') and @role='menubar']")
     category_elements = shop_menu.find_by_xpath(".//li[not(contains(@class, 'is-drilldown-submenu-parent')) and not(contains(@class, 'js-drilldown-back'))]/a")
 
-    category_pages = defaultdict(set)
+    category_pages = defaultdict(list)
     for category_anchor in category_elements:
         category_name = strip_html(category_anchor.html)
-        category_pages[category_name].add(category_anchor["href"])
+        category_pages[category_name].append(category_anchor["href"])
     return category_pages
 
 def set_as_club(browser):
@@ -149,3 +153,6 @@ if __name__ == "__main__":
         select_my_club(browser)
         category_urls = get_category_urls(browser)
         products_by_category = get_products(browser, category_urls)
+        for category, products in products_by_category.items():
+            with open(os.path.join("inventory", category.replace(" ", "-"))) as category_file:
+                json.dump(products, category_file)
