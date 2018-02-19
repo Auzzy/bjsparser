@@ -94,9 +94,10 @@ def handle_category_page(browser, category_path, cache):
             return products
         else:
             print("UNRECOGNIZED PAGE SETUP: {}".format(browser.url))
+            return {}
     else:
         # special landing page (e.g. http://www.bjs.com/apple.content.minisite_apple.B#/selection)
-        pass
+        return {}
 
 def visit_category_page(browser, category, url):
     print("{}: {}".format(category, url))
