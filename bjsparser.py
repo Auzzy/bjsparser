@@ -112,8 +112,7 @@ def handle_category_page(browser, category_path, cache):
             # subcategory page (e.g. http://www.bjs.com/fresh--refrigerated-food/bakery.category.3000000000000117225.3000000000000117224.2001257.1)
             subcategory_cells = browser.find_by_css("a.cat")
             subcategory_pages = {subcategory_cell.text: [subcategory_cell["href"]] for subcategory_cell in subcategory_cells}
-            products = walk_products(browser, subcategory_pages, category_path, cache)
-            cache_subcategories_complete(cache, category_path)
+            products = walk_products(browser, subcategory_pages, cache)
             return products
         else:
             print("UNRECOGNIZED PAGE SETUP: {}".format(browser.url))
@@ -132,25 +131,6 @@ def visit_category_page(browser, category, url):
             print(browser.url)
             raise Exception("Category page failed to load")
 
-def cache_subcategories_complete(cache, category_path):
-    # Handles the lack a parent category, such as "View All".
-    if not category_path:
-        return
-
-    subcategory_items = {}
-    # Convert to list to allow key deletion while iterating
-    for key, value in list(cache["items"].items()):
-        if category_path == key[:-1]:
-            subcategory_items.update(value)
-            del cache["items"][key]
-            del cache["serializable_items"][">".join(key)]
-    cache["items"][category_path] = subcategory_items
-    cache["serializable_items"][">".join(category_path)] = subcategory_items
-
-    items_cache_json = json.dumps(cache["serializable_items"])
-    with open(ITEMS_CACHE_FILEPATH, 'w') as cache_file:
-        cache_file.write(items_cache_json)
-
 def write_item_cache(cache, products, category_path):
     cache["items"][category_path] = products
     cache["serializable_items"][">".join(category_path)] = products
@@ -168,10 +148,13 @@ def write_completed_cache(cache, category_path):
     with open(COMPLETED_CACHE_FILEPATH, 'w') as cache_file:
         cache_file.write(completed_cache_json)
 
-def walk_products(browser, category_urls, parent_categories, cache):
+def get_full_category(browser):
+    return tuple([breadcrumb_obj.text for breadcrumb_obj in browser.find_by_css(".breadcrumbs > li")][1:])
+
+def walk_products(browser, category_urls, cache):
     products_by_category = {}
     for category, urls in category_urls.items():
-        category_path = parent_categories + ((category,) if category != "View All" else tuple())
+        category_path = get_full_category(browser) + ((category,) if category != "View All" else tuple())
         if list(category_path) in cache["completed"]:
             if category_path in cache["items"]:
                 products_by_category[category] = cache["items"][category_path]
@@ -212,7 +195,7 @@ def write_completed_cache(cache, category_path):
 
 def get_products(browser, category_urls):
     cache = load_cache()
-    return walk_products(browser, category_urls, tuple(), cache)
+    return walk_products(browser, category_urls, cache)
 
 def get_category_urls(browser):
     category_elements = browser.find_by_xpath("//li[contains(@class, 'is-drilldown-submenu-item') and not(contains(@class, 'is-drilldown-submenu-parent')) and not(contains(@class, 'js-drilldown-back')) and not(contains(@class, 'services'))]/a")
