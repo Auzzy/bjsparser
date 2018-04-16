@@ -50,13 +50,29 @@ def strip_html(text):
     text = text.replace("&amp;", "&")
     return text
 
-def filter_in_club(browser):
-    if not browser.is_element_present_by_css(".counts .club", wait_time=5):
-        print(browser.url)
-        raise Exception("\"In Club\" button missing.")
+def handle_missing_in_club_button(browser):
+    if True: #the page is empty:
+        # This needs to happen again so I can know what the page looks like.
+        pass
+    elif browser.is_element_present_by_id("pdp"):
+        # The page being a product page should be handled appropriately by parse_items().
+        pass
 
-    browser.find_by_css(".counts .club").click()
+    raise Exception("\"In Club\" button missing.")
+
+def filter_in_club(browser):
+    in_club_xpath = "//*[contains(@class, 'count')]/a[./*[contains(@class, 'club')]]"
+    if not browser.is_element_present_by_xpath(in_club_xpath, wait_time=5):
+        handle_missing_in_club_button(browser)
+
+    # browser.find_by_css(".counts .club").click()
+    in_club_anchor = browser.find_by_xpath(in_club_xpath)
+    if in_club_anchor.has_class("disabled"):
+        return False
+
+    in_club_anchor.click()
     time.sleep(2)
+    return True
 
 def increase_items_per_page(browser):
     pagination_select = browser.find_by_xpath("//select[@name='pagination']")[0]
@@ -65,23 +81,30 @@ def increase_items_per_page(browser):
     time.sleep(2)
 
 def parse_items(browser):
-    product_cells = browser.find_by_css("div.product")
-    product_pages = {product_cell.find_by_css("p.title")[0].text: product_cell.find_by_tag("a")[0]["href"] for product_cell in product_cells}
-    if browser.is_element_present_by_css("a.next"):
-        browser.find_by_css("a.next").click()
-        if not browser.is_element_present_by_css(".below-header", wait_time=5):
-            print(browser.url)
-            raise Exception("Next page failed to load.")
+    if browser.is_element_present_by_id("pdp"):
+        product_name = browser.find_by_id("itemNameID")
+        product_url = browser.url
+        return {product_name: product_url}
+    elif browser.is_element_present_by_id("cat"):
+        product_cells = browser.find_by_css("div.product")
+        product_pages = {product_cell.find_by_css("p.title")[0].text: product_cell.find_by_tag("a")[0]["href"] for product_cell in product_cells}
+        if browser.is_element_present_by_css("a.next"):
+            browser.find_by_css("a.next").click()
+            if not browser.is_element_present_by_css(".below-header", wait_time=5):
+                raise Exception("Next page failed to load.")
 
-        product_pages.update(parse_items(browser))
-    return product_pages
+            product_pages.update(parse_items(browser))
+        return product_pages
 
 def handle_category_page(browser, category_path, cache):
     if browser.is_element_present_by_id("cat"):
         if browser.is_element_present_by_css("div.product-area"):
             # item list page (e.g. http://www.bjs.com/computers/laptops.category.747.743.2002360.1)
             increase_items_per_page(browser)
-            filter_in_club(browser)
+            any_in_club_items = filter_in_club(browser)
+            if not any_in_club_items:
+                return {}
+
             products = parse_items(browser)
             write_item_cache(cache, products, category_path)
             return products
@@ -192,7 +215,7 @@ def get_products(browser, category_urls):
     return walk_products(browser, category_urls, tuple(), cache)
 
 def get_category_urls(browser):
-    category_elements = browser.find_by_xpath("//li[contains(@class, 'is-drilldown-submenu-item') and not(contains(@class, 'is-drilldown-submenu-parent')) and not(contains(@class, 'js-drilldown-back'))]/a")
+    category_elements = browser.find_by_xpath("//li[contains(@class, 'is-drilldown-submenu-item') and not(contains(@class, 'is-drilldown-submenu-parent')) and not(contains(@class, 'js-drilldown-back')) and not(contains(@class, 'services'))]/a")
 
     category_pages = defaultdict(list)
     for category_anchor in category_elements:
