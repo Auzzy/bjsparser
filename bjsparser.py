@@ -1,256 +1,120 @@
-import atexit
 import json
-import os
-import re
-import shlex
-import shutil
-import subprocess
-import tempfile
+import requests
 import time
-from collections import defaultdict
 
-from splinter import Browser
+ITEMS_FILEPATH = "products.json"
 
-# Two appear on the page, but only the one whose parent is 'title-bar' is visible
-FIND_A_CLUB_XPATH = "//div[contains(@class, 'title-bar')]//span[contains(@class, 'club-name')]/parent::a"
+BJS_CLUB_ID = "Club0001"
+BJS_API_ENDPOINT = "https://bjswholesale-cors.groupbycloud.com/api/v1/search"
+PAGE_SIZE = 120
+FIELDS = [
+    "title",
+    "gbi_categories",
+    "visualVariant.nonvisualVariant.product_url"
+]
+REFINEMENTS = [
+    {
+        "navigationName": "visualVariant.nonvisualVariant.availability",
+        "type": "Value",
+        "value": BJS_CLUB_ID
+    }
+]
+EXCLUDE_CATEGORIES = [
+    "TVs & Home Theater",
+    "Computers & Tablets",
+    "Office",
+    "Furniture",
+    "Patio & Outdoor Living",
+    "Lawn & Garden",
+    "Baby & Kids",
+    "Sports & Fitness",
+    "Toys & Video Games",
+    "Jewelry",
+    "Apparel",
+    "Gift Cards",
+    "Clearance"
+]
 
-PHANTOMJS_URL = "https://bitbucket.org/ariya/phantomjs/downloads/phantomjs-2.1.1-linux-x86_64.tar.bz2"
-OPEN_CLOSE_TAG_RE = re.compile(r"<(.*?)>.*?</\1>")
-SINGLE_TAG_RE = re.compile("<.*?>")
 
-ITEMS_CACHE_FILEPATH = ".cache.items.json"
-COMPLETED_CACHE_FILEPATH = ".cache.completed.json"
+def done(page_json):
+    return get_end_index(page_json) == page_json["totalRecordCount"]
 
+def get_end_index(page_json):
+    return page_json["pageInfo"]["recordEnd"]
 
-def install_phantomjs(phantomjs_url=PHANTOMJS_URL):
-    filename = "phantomjs.tar.bz2"
-    
-    tempdir = tempfile.mkdtemp()
-    atexit.register(shutil.rmtree, tempdir)
-    
-    filepath = os.path.join(tempdir, filename)
-    download_phantomjs_cmd = "wget {0} -O {1}".format(phantomjs_url, filepath)
-    subprocess.call(shlex.split(download_phantomjs_cmd))
+def process_page_items(page_json):
+    page_items = []
+    for item in page_json["records"]:
+        item_info = item["allMeta"]
 
-    untar_phantomjs_cmd = "tar -xjvf {0} -C {1}".format(filepath, tempdir)
-    untar_output = subprocess.check_output(shlex.split(untar_phantomjs_cmd))
-    phantomjs_dir = untar_output.splitlines()[0].decode('utf-8')
+        # I'm unsure why some products have a gbi_categories value of null...
+        gbi_categories = [gbi_category for gbi_category in item_info["gbi_categories"] if gbi_category]
 
-    os.environ["PATH"] += ":" + os.path.join(tempdir, phantomjs_dir, "bin")
+        categories = []
+        for gbi_category in gbi_categories:
+            categories.append([gbi_category[index] for index in sorted(gbi_category) if gbi_category[index]])
+        
+        page_items.append({
+            "name": item_info["title"],
+            "categories": categories,
+            "url": item_info["visualVariant"][0]["nonvisualVariant"][0]["product_url"],
+        })
 
-def init_browser():
-    browser = Browser("phantomjs")
-    browser.driver.set_window_size(2000, 10000)
-    browser.driver.set_page_load_timeout(30)
-    return browser
+    return page_items
 
-def strip_html(text):
-    text = OPEN_CLOSE_TAG_RE.sub("", text)
-    text = SINGLE_TAG_RE.sub("", text)
-    text = text.replace("&amp;", "&")
-    return text
+def create_payload(start_index):
+    return {
+        "skip": start_index,
+        "pageSize": PAGE_SIZE,
+        "fields": FIELDS,
+        "refinements": REFINEMENTS,
+        "area": "BCProduction",
+        "collection": "productionB2CProducts",
+        "sort": {
+            "field": "_relevance",
+            "order": "Descending"
+        },
+        "excludedNavigations": [
+            "visualVariant.nonvisualVariant.availability"
+        ],
+        "biasing": {
+            "biases": []
+        },
+        "query": None
+    }
 
-def handle_missing_in_club_button(browser):
-    if True: #the page is empty:
-        # This needs to happen again so I can know what the page looks like.
-        pass
-    elif browser.is_element_present_by_id("pdp"):
-        # The page being a product page should be handled appropriately by parse_items().
-        pass
+def send_request(start_index):
+    response = requests.post(BJS_API_ENDPOINT, json=create_payload(start_index))
+    return response.json()
 
-    raise Exception("\"In Club\" button missing.")
+def _write_items(new_items):
+    with open(ITEMS_FILEPATH, 'r') as bjs_items_file:
+        current_items = json.load(bjs_items_file)
 
-def filter_in_club(browser):
-    in_club_xpath = "//*[contains(@class, 'count')]/a[./*[contains(@class, 'club')]]"
-    if not browser.is_element_present_by_xpath(in_club_xpath, wait_time=5):
-        handle_missing_in_club_button(browser)
+    current_items["items"].extend(new_items)
+    with open(ITEMS_FILEPATH, 'w') as bjs_items_file:
+        json.dump(current_items, bjs_items_file)
 
-    # browser.find_by_css(".counts .club").click()
-    in_club_anchor = browser.find_by_xpath(in_club_xpath)
-    if in_club_anchor.has_class("disabled"):
-        return False
+def _clear_items():
+    with open(ITEMS_FILEPATH, 'w') as bjs_items_file:
+        json.dump({"items": []}, bjs_items_file)
 
-    in_club_anchor.click()
-    time.sleep(2)
-    return True
+def download_raw_bjs_inventory():
+    _clear_items()
 
-def increase_items_per_page(browser):
-    pagination_select = browser.find_by_xpath("//select[@name='pagination']")[0]
-    option_values = {int(option.text.split()[0].strip()): option["value"] for option in pagination_select.find_by_tag("option")}
-    pagination_select.select(option_values[max(option_values.keys())])
-    time.sleep(2)
+    start_index = 0
+    while True:
+        page_json = send_request(start_index)
+        page_items = process_page_items(page_json)
+        _write_items(page_items)
 
-def parse_items(browser):
-    if browser.is_element_present_by_id("pdp"):
-        product_name = browser.find_by_id("itemNameID")
-        product_url = browser.url
-        return {product_name: product_url}
-    elif browser.is_element_present_by_id("cat"):
-        product_cells = browser.find_by_css("div.product")
-        product_pages = {product_cell.find_by_css("p.title")[0].text: product_cell.find_by_tag("a")[0]["href"] for product_cell in product_cells}
-        if browser.is_element_present_by_css("a.next"):
-            browser.find_by_css("a.next").click()
-            if not browser.is_element_present_by_css(".below-header", wait_time=5):
-                raise Exception("Next page failed to load.")
+        if done(page_json):
+            break
 
-            product_pages.update(parse_items(browser))
-        return product_pages
+        start_index = get_end_index(page_json)
 
-def handle_category_page(browser, category_path, cache):
-    if browser.is_element_present_by_id("cat"):
-        if browser.is_element_present_by_css("div.product-area"):
-            # item list page (e.g. http://www.bjs.com/computers/laptops.category.747.743.2002360.1)
-            increase_items_per_page(browser)
-            any_in_club_items = filter_in_club(browser)
-            if not any_in_club_items:
-                return {}
+        # Since this is an unofficial API, self-throttle to avoid pissing them off.
+        time.sleep(5)
 
-            products = parse_items(browser)
-            write_item_cache(cache, products, category_path)
-            return products
-        elif browser.is_element_present_by_css("div.categories"):
-            # subcategory page (e.g. http://www.bjs.com/fresh--refrigerated-food/bakery.category.3000000000000117225.3000000000000117224.2001257.1)
-            subcategory_cells = browser.find_by_css("a.cat")
-            subcategory_pages = {subcategory_cell.text: [subcategory_cell["href"]] for subcategory_cell in subcategory_cells}
-            products = walk_products(browser, subcategory_pages, cache)
-            return products
-        else:
-            print("UNRECOGNIZED PAGE SETUP: {}".format(browser.url))
-            return {}
-    else:
-        # special landing page (e.g. http://www.bjs.com/apple.content.minisite_apple.B#/selection)
-        return {}
-
-def visit_category_page(browser, category, url):
-    print("{}: {}".format(category, url))
-    browser.visit(url)
-    if not browser.is_element_present_by_css(".below-header", wait_time=5):
-        print("Category page failed to load. Trying again...")
-        browser.visit(url)
-        if not browser.is_element_present_by_css(".below-header", wait_time=5):
-            print(browser.url)
-            raise Exception("Category page failed to load")
-
-def write_item_cache(cache, products, category_path):
-    cache["items"][category_path] = products
-    cache["serializable_items"][">".join(category_path)] = products
-    items_cache_json = json.dumps(cache["serializable_items"])
-    with open(ITEMS_CACHE_FILEPATH, 'w') as cache_file:
-        cache_file.write(items_cache_json)
-
-def write_completed_cache(cache, category_path):
-    # Handles the lack a parent category, such as "View All".
-    if not category_path:
-        return
-
-    cache["completed"].append(category_path)
-    completed_cache_json = json.dumps(cache["completed"])
-    with open(COMPLETED_CACHE_FILEPATH, 'w') as cache_file:
-        cache_file.write(completed_cache_json)
-
-def get_full_category(browser):
-    return tuple([breadcrumb_obj.text for breadcrumb_obj in browser.find_by_css(".breadcrumbs > li")][1:])
-
-def walk_products(browser, category_urls, cache):
-    products_by_category = {}
-    for category, urls in category_urls.items():
-        category_path = get_full_category(browser) + ((category,) if category != "View All" else tuple())
-        if list(category_path) in cache["completed"]:
-            if category_path in cache["items"]:
-                products_by_category[category] = cache["items"][category_path]
-        else:
-            products_by_category[category] = {}
-            for url in urls:
-                visit_category_page(browser, category, url)
-                products = handle_category_page(browser, category_path, cache)
-                products_by_category[category].update(products)
-            write_completed_cache(cache, category_path)
-
-    return products_by_category
-
-def load_cache():
-    cache = {"items": {}, "serializable_items": {}, "completed": []}
-
-    if os.path.exists(ITEMS_CACHE_FILEPATH):
-        with open(ITEMS_CACHE_FILEPATH) as cache_file:
-            raw_cache_contents = cache_file.read()
-        if raw_cache_contents:
-            cache["serializable_items"] = json.loads(raw_cache_contents)
-            cache["items"] = {tuple(key.split(">")): value for key, value in cache["serializable_items"].items()}
-    
-    if os.path.exists(COMPLETED_CACHE_FILEPATH):
-        with open(COMPLETED_CACHE_FILEPATH) as cache_file:
-            raw_cache_contents = cache_file.read()
-        if raw_cache_contents:
-            cache["completed"] = json.loads(raw_cache_contents)
-
-    return cache
-
-def write_completed_cache(cache, category_path):
-    cache["completed"].append(category_path)
-    with open(COMPLETED_CACHE_FILEPATH, 'w') as cache_file:
-        json.dump(cache["completed"], cache_file)
-
-    return cache
-
-def get_products(browser, category_urls):
-    cache = load_cache()
-    return walk_products(browser, category_urls, cache)
-
-def get_category_urls(browser):
-    category_elements = browser.find_by_xpath("//li[contains(@class, 'is-drilldown-submenu-item') and not(contains(@class, 'is-drilldown-submenu-parent')) and not(contains(@class, 'js-drilldown-back')) and not(contains(@class, 'services'))]/a")
-
-    category_pages = defaultdict(list)
-    for category_anchor in category_elements:
-        category_name = strip_html(category_anchor.html)
-        category_pages[category_name].append(category_anchor["href"])
-    return category_pages
-
-def set_as_club(browser):
-    browser.find_by_id("shopClubBtn").click()
-    
-    time.sleep(5)
-
-    if browser.find_by_xpath(FIND_A_CLUB_XPATH).text.lower() != "bj's medford":
-        print(browser.url)
-        raise Exception("Club doesn't seem to be set.")
-
-def enter_location(browser):
-    club_search_form = browser.find_by_xpath("//form[@id='locator_dropdown']")[0]
-    club_search_form.find_by_xpath("//select[@name='clubState']").select("MA")
-    
-    town_value = club_search_form.find_by_text("Medford").value
-    club_search_form.find_by_xpath("//select[@name='clubTown']").select(town_value)
-
-    if not browser.is_element_present_by_id("shopClubBtn", wait_time=5):
-        raise Exception("The page doesn't seem to have loaded.")
-
-def find_a_club(browser):
-    """The URL of "Find a Club" appears to be managed by a CMS, so it's subject to change. Looking for the button and
-    clicking it is more reliable.
-    """
-    if not browser.is_element_present_by_xpath(FIND_A_CLUB_XPATH, wait_time=5):
-        print(browser.url)
-        raise Exception("Couldn't find \"Find a Club\"")
-
-    browser.find_by_xpath(FIND_A_CLUB_XPATH).click()
-
-    if not browser.is_element_present_by_xpath("//div[contains(@class, 'find-a-club')]", wait_time=5):
-        print(browser.url)
-        raise Exception("The Find a Club page does not seem to have loaded.")
-
-def select_my_club(browser):
-    browser.visit("http://www.bjs.com/")
-    find_a_club(browser)
-    enter_location(browser)
-    set_as_club(browser)
-    
 if __name__ == "__main__":
-    install_phantomjs()
-    with init_browser() as browser:
-        select_my_club(browser)
-        category_urls = get_category_urls(browser)
-        products_by_category = get_products(browser, category_urls)
-        for category, products in products_by_category.items():
-            with open(os.path.join("inventory", category.replace(" ", "-"))) as category_file:
-                json.dump(products, category_file)
+    download_raw_bjs_inventory()
