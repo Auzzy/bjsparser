@@ -5,19 +5,45 @@ import sqlite3
 import sys
 
 EXCLUDE_CATEGORIES = [
-    "TVs & Home Theater",
-    "Computers & Tablets",
-    "Office",
-    "Furniture",
-    "Patio & Outdoor Living",
-    "Lawn & Garden",
-    "Baby & Kids",
-    "Sports & Fitness",
-    "Toys & Video Games",
-    ["Jewelry", "Rings", "Diamond Rings"],
     "Apparel",
+    "Baby & Kids",
+    "Clearance",
+    "Computers & Tablets",
+    "Furniture",
     "Gift Cards",
-    "Clearance"
+    "Health & Beauty",
+    "Jewelry",
+    "Lawn & Garden",
+    "MobileDeli",  # This shows up in our query, but not on the page.
+    "Office",
+    "Patio & Outdoor Living",
+    "Toys & Video Games",
+    "TV & Electronics",
+    "Sports & Fitness",
+    ["Appliances", "Cooling & Heating", "Electric Fireplaces"],
+    ["Appliances", "Cooling & Heating", "Air Conditioners"],
+    ["Appliances", "Cooling & Heating", "Heaters & Radiators"],
+    ["Appliances", "Freezers"],
+    ["Appliances", "Mini Fridges & Wine Coolers"],
+    ["Appliances", "Small Kitchen Appliances", "Popcorn Makers & Specialty"],
+    ["Appliances", "Small Kitchen Appliances", "Rice Cookers, Steamers & Fryers"],
+    ["Appliances", "Small Kitchen Appliances", "Specialty Beverages"],
+    ["Appliances", "Small Kitchen Appliances", "Toasters, Ovens & Indoor Grills"],
+    ["Grocery, Household & Pet", "Pet"],
+    ["Grocery, Household & Pet", "Cleaning & Household Goods", "Laundry & Clothing Care"],
+    ["Grocery, Household & Pet", "Cleaning & Household Goods", "Vacuums & Floor Care"],
+    ["Home", "Bedding & Bath", "Mattress Pads & Toppers"],
+    ["Home", "Bedding & Bath", "Sheet Sets"],
+    ["Home", "Bedding & Bath", "Pillows"],
+    ["Home", "Bedding & Bath", "Comforters, Quilts & Bedspreads"],
+    ["Home", "Bedding & Bath", "Blankets & Throws"],
+    ["Home", "Bedding & Bath", "Shower Rods, Curtains & Hardware"],
+    ["Home", "Bedding & Bath", "Bed & Bath Aids"],
+    ["Home", "Bedding & Bath", "Bath Rugs"],
+    ["Home", "Flowers & Plants"],
+    ["Home", "Home Decor"],
+    ["Home", "Luggage"],
+    ["Home", "Rugs & Flooring"]
 ]
 
 def load_inventory():
@@ -57,8 +83,9 @@ def insert_categories(categories, store):
 
 def exclude(categories, exclude_categories):
     for category in categories:
-        if tuple(category) in exclude_categories:
-            return True
+        for index in range(len(category)):
+            if tuple(category[:index + 1]) in exclude_categories:
+                return True
     return False
 
 db_path = sys.argv[1] if len(sys.argv) >= 2 else "inventory.db"
@@ -69,13 +96,7 @@ cursor.execute("PRAGMA foreign_keys = ON")
 cursor.execute("CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, store TEXT, parentid INTEGER, FOREIGN KEY(parentid) REFERENCES categories(id))")
 cursor.execute("""CREATE TABLE IF NOT EXISTS products (name, categoryid, url, store, stocked)""")
 
-# Create a set of all category paths. So if the list above contains ["Jewelry", "Rings", "Diamond Rings"],
-# the generated list will contain ("Jewelry",), ("Jewelry", "Rings"), and ("Jewelry", "Rings", "Diamond Rings").
-exclude_categories = set()
-for category in EXCLUDE_CATEGORIES:
-    category_item = (category, ) if isinstance(category, str) else tuple(category)
-    for index in range(len(category_item)):
-        exclude_categories.add(category_item[:index + 1])
+exclude_categories = {(category, ) if isinstance(category, str) else tuple(category) for category in EXCLUDE_CATEGORIES}
 
 store = "BJs"
 inventory = load_inventory()
