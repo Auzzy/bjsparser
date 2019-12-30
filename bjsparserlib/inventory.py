@@ -2,8 +2,6 @@ import json
 import requests
 import time
 
-ITEMS_FILEPATH = "products.json"
-
 BJS_CLUB_ID = "Club0001"
 BJS_API_ENDPOINT = "https://bjswholesale-cors.groupbycloud.com/api/v1/search"
 PAGE_SIZE = 120
@@ -87,26 +85,31 @@ def send_request(start_index):
     response = requests.post(BJS_API_ENDPOINT, json=create_payload(start_index))
     return response.json()
 
-def _write_items(new_items):
-    with open(ITEMS_FILEPATH, 'r') as bjs_items_file:
-        current_items = json.load(bjs_items_file)
+def _update_inventory(current_inventory, new_inventory, inventory_filepath):
+    current_inventory["inventory"].extend(new_inventory)
 
-    current_items["items"].extend(new_items)
-    with open(ITEMS_FILEPATH, 'w') as bjs_items_file:
-        json.dump(current_items, bjs_items_file)
+    if inventory_filepath:
+        with open(inventory_filepath, 'w') as bjs_items_file:
+            json.dump(current_inventory, bjs_items_file)
 
-def _clear_items():
-    with open(ITEMS_FILEPATH, 'w') as bjs_items_file:
-        json.dump({"items": []}, bjs_items_file)
+    return current_inventory
 
-def download_raw_bjs_inventory():
-    _clear_items()
+def _clear_inventory(inventory_filepath):
+    inventory = {"inventory": []}
+    with open(inventory_filepath, 'w') as bjs_inventory_file:
+        json.dump(inventory, bjs_inventory_file)
+    return inventory
 
+def download(inventory_filepath):
+    inventory = {}
+    if inventory_filepath:
+        inventory = _clear_inventory(inventory_filepath)
+    
     start_index = 0
     while True:
         page_json = send_request(start_index)
-        page_items = process_page_items(page_json)
-        _write_items(page_items)
+        page_inventory = process_page_items(page_json)
+        inventory = _update_inventory(inventory, page_inventory, inventory_filepath)
 
         if done(page_json):
             break
@@ -116,5 +119,4 @@ def download_raw_bjs_inventory():
         # Since this is an unofficial API, self-throttle to avoid pissing them off.
         time.sleep(5)
 
-if __name__ == "__main__":
-    download_raw_bjs_inventory()
+    return inventory
