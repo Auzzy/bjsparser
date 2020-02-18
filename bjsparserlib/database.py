@@ -105,12 +105,12 @@ def _insert_inventory(cursor, inventory):
             print("No category information for {}".format(item["name"]))
             continue
 
-        cursor.execute("INSERT INTO products (name, categoryid, url, store, stocked) VALUES (?, ?, ?, ?, ?)", (item["name"], category_id, item["url"], store, None))
+        cursor.execute("INSERT INTO products (name, price, categoryid, url, store, stocked) VALUES (?, ?, ?, ?, ?, ?)", (item["name"], json.dumps(item["price"]), category_id, item["url"], store, None))
 
 def _create_tables(cursor):
     cursor.execute("PRAGMA foreign_keys = ON")
     cursor.execute("CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, store TEXT, parentid INTEGER, FOREIGN KEY(parentid) REFERENCES categories(id))")
-    cursor.execute("CREATE TABLE IF NOT EXISTS products (name, categoryid, url, store, stocked)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS products (name, price, categoryid, url, store, stocked)")
 
 def _db_connect(database_filepath):
     connection = sqlite3.connect(database_filepath)

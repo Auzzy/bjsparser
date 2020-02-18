@@ -2,19 +2,21 @@ import json
 import requests
 import time
 
-BJS_CLUB_ID = "Club0001"
+BJS_CLUB_ID = "0001"
 BJS_API_ENDPOINT = "https://bjswholesale-cors.groupbycloud.com/api/v1/search"
 PAGE_SIZE = 120
 FIELDS = [
     "title",
     "gbi_categories",
-    "visualVariant.nonvisualVariant.product_url"
+    "visualVariant.nonvisualVariant.product_url",
+    "visualVariant.nonvisualVariant.clubid_price",
+    "visualVariant.nonvisualVariant.displayPrice"
 ]
 REFINEMENTS = [
     {
         "navigationName": "visualVariant.nonvisualVariant.availability",
         "type": "Value",
-        "value": BJS_CLUB_ID
+        "value": f"Club{BJS_CLUB_ID}"
     }
 ]
 EXCLUDE_CATEGORIES = [
@@ -40,6 +42,19 @@ def done(page_json):
 def get_end_index(page_json):
     return page_json["pageInfo"]["recordEnd"]
 
+def get_price(item_info):
+    prices = set()
+    for item in item_info["visualVariant"][0]["nonvisualVariant"]:
+        clubid_price = item.get("clubid_price")
+        if clubid_price:
+            prices.add(dict([item.split("_") for item in clubid_price.split(";")])[BJS_CLUB_ID])
+        else:
+            prices.add(item["displayPrice"])
+
+    max_price = max(prices)
+    min_price = min(prices)
+    return (max_price, ) if max_price == min_price else (min_price, max_price)
+
 def process_page_items(page_json):
     page_items = []
     for item in page_json["records"]:
@@ -51,11 +66,12 @@ def process_page_items(page_json):
         categories = []
         for gbi_category in gbi_categories:
             categories.append([gbi_category[index] for index in sorted(gbi_category) if gbi_category[index]])
-        
+
         page_items.append({
             "name": item_info["title"],
             "categories": categories,
             "url": item_info["visualVariant"][0]["nonvisualVariant"][0]["product_url"],
+            "price": get_price(item_info)
         })
 
     return page_items
