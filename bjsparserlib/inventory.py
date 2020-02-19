@@ -47,9 +47,10 @@ def get_price(item_info):
     for item in item_info["visualVariant"][0]["nonvisualVariant"]:
         clubid_price = item.get("clubid_price")
         if clubid_price:
-            prices.add(dict([item.split("_") for item in clubid_price.split(";")])[BJS_CLUB_ID])
+            price = dict([item.split("_") for item in clubid_price.split(";")])[BJS_CLUB_ID]
         else:
-            prices.add(item["displayPrice"])
+            price = item["displayPrice"]
+        prices.add(price.replace("$", ""))
 
     max_price = max(prices)
     min_price = min(prices)
