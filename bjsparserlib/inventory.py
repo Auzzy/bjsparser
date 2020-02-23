@@ -51,7 +51,7 @@ def get_price(item_info):
             price = dict([price_and_club.split("_") for price_and_club in clubid_price.split(";")])[BJS_CLUB_ID]
         else:
             price = variant["displayPrice"]
-        prices.add(price.replace("$", ""))
+        prices.add(float(price.replace("$", "").replace(",", "")))
 
     return {
         "max": max(prices),
