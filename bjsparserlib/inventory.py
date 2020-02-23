@@ -53,9 +53,10 @@ def get_price(item_info):
             price = variant["displayPrice"]
         prices.add(price.replace("$", ""))
 
-    max_price = max(prices)
-    min_price = min(prices)
-    return (max_price, ) if max_price == min_price else (min_price, max_price)
+    return {
+        "max": max(prices),
+        "min": min(prices)
+    }
 
 def process_page_items(page_json):
     page_items = []
