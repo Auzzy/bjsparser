@@ -10,7 +10,8 @@ FIELDS = [
     "gbi_categories",
     "visualVariant.nonvisualVariant.product_url",
     "visualVariant.nonvisualVariant.clubid_price",
-    "visualVariant.nonvisualVariant.displayPrice"
+    "visualVariant.nonvisualVariant.displayPrice",
+    "visualVariant.nonvisualVariant.partnumber"
 ]
 REFINEMENTS = [
     {
@@ -71,6 +72,7 @@ def process_page_items(page_json):
             categories.append([gbi_category[index] for index in sorted(gbi_category) if gbi_category[index]])
 
         page_items.append({
+            "sku": item_info["visualVariant"][0]["nonvisualVariant"][0]["partnumber"],
             "name": item_info["title"],
             "categories": categories,
             "url": item_info["visualVariant"][0]["nonvisualVariant"][0]["product_url"],
